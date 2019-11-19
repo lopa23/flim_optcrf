@@ -118,8 +118,6 @@ class CRFasRNN(nn.Module):
         # softmax
         self.softmax = nn.Softmax2d()
         self.softmax.requires_grad=True
-        self.out_act = nn.Threshold(.5,0)
-        self.out_act1 = nn.Threshold(-0.000001,1)
         
     def forward(
             self,
@@ -149,7 +147,7 @@ class CRFasRNN(nn.Module):
         softmax_out = self.softmax(q_values)
 
         #
-        #self.nb_iterations=1;
+        self.nb_iterations=1;
         #print(q_values,softmax_out)
         for i in range(self.nb_iterations):
             print("Iteration",i)
@@ -185,10 +183,9 @@ class CRFasRNN(nn.Module):
 
             # 5. Softmax
             softmax_out = self.softmax(q_values)
-            y = self.out_act(softmax_out)
-            y = self.out_act1(-1*y)
             
-        return y#softmax_out
+
+        return softmax_out
 
     def crf_dict(self):
         return {

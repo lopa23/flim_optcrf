@@ -175,7 +175,6 @@ class Ensemble(nn.Module):
         y=y[0,:,:] #need to look into this
         print('Final Output',y.size())
         p1, p2=y.size()
-        print(y)
         return y
 
     #def main(self):
