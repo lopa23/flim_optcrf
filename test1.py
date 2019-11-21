@@ -22,7 +22,8 @@ import math
 import sys
 sys.path.insert(0, '.')
 from  CRFasRNN import CRFasRNN as crfrnn
-
+from dataset_reader import MyDataset
+from torch.utils.data import DataLoader
 
 def modify_output(output,Pixel_pos,nsize):
     n1, n2=output.size()
@@ -35,31 +36,6 @@ def modify_output(output,Pixel_pos,nsize):
         new_output[:,x-1,y-1]=output[:,k]
 
     return new_output
-
-
-def get_loaders():
-    Q, p, G, h, A, b, m=read_mat_file()
-    img= mpimg.imread('../0ng/export_modified/00ng_im3_NADH_PC102_60s_40x_oil_intensity_image.bmp');
-    img=torch.from_numpy(img)
-    img=img.unsqueeze(0)
-    target=mpimg.imread('../0ng/export_modified/00ng_im3_NADH_PC102_60s_40x_oil_truth.bmp');
-    #print('target',target.shape)
-  
-    #label = np.loadtxt("../mycode/label_00ng_im3_NADH_PC102_60s_40x.txt", dtype='i', delimiter=',')
-    label = np.loadtxt("../0ng/export_modified/label.txt", dtype='i', delimiter=',')
-    p1, p2=label.shape
-    if(p2>1):
-        Pixel_pos=torch.from_numpy(label[:,[0, 1]])
-        Pixel_pos=Pixel_pos.type(torch.uint8).cuda()
-        #Pixel_pos=None
-        anno=torch.from_numpy(label[:,2])
-        #anno=torch.round(torch.rand(256,256))
-    else:
-        Pixel_pos=None
-        anno=torch.from_numpy(label)
-    
-    #print(anno.size(), Pixel_pos.size())
-    return Q, p, G, h, A, b, m, img, anno, Pixel_pos, target
 
 def main():
      ##Setting up parameters
@@ -85,16 +61,17 @@ def main():
     args.save = os.path.join('work', t)
     
    ##File read and image reads,this needs to be converted to batch mode later on
-    Q, p, G, h, A, b, m, img, anno, Pixel_pos, target = get_loaders()
+    #Q, p, G, h, A, b, m, img, anno, Pixel_pos, target = get_loaders()
+    traindataset = MyDataset(('../0ng/export_modified/train/'))
 
+    train_loader = DataLoader(traindataset, batch_size=1)
     ##end of file reads
-
- 
-        
     
+     
     net=Ensemble(OptNet,crfrnn)
     for epoch in range(1, nEpoch + 1):
-        y=train(net,Q, p, G, h, m, img, anno.detach().numpy(),Pixel_pos,target)
+        #y=train(net,Q, p, G, h, m, img, anno.detach().numpy(),Pixel_pos,target)
+        y=train(net,train_loader)
    #     test(epoch,net,Q, p, G, h, m, img, anno.detach().numpy())
     #    try:
     #        torch.save(net, os.path.join(args.save, 'latest.pth'))
@@ -104,10 +81,9 @@ def main():
     plt.imshow(y, interpolation='nearest')
     plt.show()
 
-def train(net, Q, p, G, h, m, img, anno, Pixel_pos, target):
-    
-    #print('target',target.shape)
-     
+#def train(net, Q, p, G, h, m, img, anno, Pixel_pos, target):
+def train(net,train_loader):
+       
     for param in net.opt.parameters():
             param.requires_grad = False
     for param in net.crf.parameters():
@@ -121,22 +97,33 @@ def train(net, Q, p, G, h, m, img, anno, Pixel_pos, target):
                 {'params':list(net.opt.parameters())+list(net.crf.parameters()), 'lr': 1e-3}])
 
     optimizer.zero_grad()
-
-    y=net(x,Q,p,G,h,m,img, anno,Pixel_pos)
-    #next few lines is to make loss function work (change later)
-    #output=output.view(p2/2,2)
-    #output=torch.rand(p2,2).cuda() #this should be of size n x c
-    #target=torch.rand(y.size())
-    target=torch.from_numpy(target) #this will be fixed later, should be of size n
     
-    target=target.type(torch.float).cuda()
+    for batch_idx, data in (train_loader):
+        
+        img, target, anno, Pixel_pos, Q, p, G, h, m=data['image'], data['target'], data['Anno'], data['Pixel_pos'],data['Q'], data['p'],data['G'],data['h'],data['m']
+        target=target.squeeze(0)
+        anno=anno.squeeze(0)
+        Pixel_pos=Pixel_pos.squeeze(0)
+        Q=Q.squeeze(0)
+        p=p.squeeze(0)
+        G=G.squeeze(0)
+        h=h.squeeze(0)
+        
+        y=net(x,Q,p,G,h,m,img, anno,Pixel_pos)
+        #next few lines is to make loss function work (change later)
+        #output=output.view(p2/2,2)
+        #output=torch.rand(p2,2).cuda() #this should be of size n x c
+        #target=torch.rand(y.size())
+        #target=torch.from_numpy(target) #this will be fixed later, should be of size n
     
-    loss = F.mse_loss(y, target)
-    loss = Variable(loss, requires_grad = True)
+        target=target.type(torch.float).cuda()
+    
+        loss = F.mse_loss(y, target)
+        loss = Variable(loss, requires_grad = True)
         # make_graph.save('/tmp/t.dot', loss.creator); assert(False)
-    print("Loss value",loss.item())
-    loss.backward()
-    optimizer.step()
+        print("Loss value",loss.item())
+        loss.backward()
+        optimizer.step()
 
     return y
 
@@ -162,7 +149,7 @@ class Ensemble(nn.Module):
      def forward(self, x,Q,p,G,h,m,img, anno, Pixel_pos):
         n=img.size()                   
         output=self.opt(x,Q,p,G,h,m)#.to(device)
-        #output=torch.rand(10,6186);
+        #output=torch.rand(10,3196);
         if(Pixel_pos is None):
             output=output.view(-1,n[1],n[2]);
         else:
@@ -251,67 +238,6 @@ class OptNet(nn.Module):
     def main(self):
         self.init()
 
-def kron(matrix1, matrix2):
-    """
-    Kronecker product of matrices a and b with leading batch dimensions.
-    Batch dimensions are broadcast. The number of them mush
-    :type a: torch.Tensor
-    :type b: torch.Tensor
-    :rtype: torch.Tensor
-    """
-    r=matrix1.size(0)
-    R=repeat_along_diag(matrix2,r)
-    
-    #R=torch.zeros(n*m,n*m)
-
-    return R
-   
-    
-def repeat_along_diag(a, r):
-    m,n = a.shape
-    out = np.zeros((r,m,r,n), dtype=float)
-    diag = np.einsum('ijik->ijk',out)
-    diag[:] = (a)
-    return out.reshape(-1,n*r)
-
-
-def read_mat_file():
-    fname='../mycode/H.mat'
-    file = tables.open_file(fname)
-    Q = file.root.HH[:]
-    p=file.root.f[:]
-    G=file.root.D[:]
-    m=file.root.m[:]
-   
-
-    m=int(m[0].item())
-    print("Size m",m)
-    Q=torch.tensor(Q).float();
-    E=torch.eye(m)
-    Q=torch.from_numpy(kron(E,Q))
-    print("Size Q",Q.size())
-    
-    n=Q.size(0)
-    p=torch.tensor(p);
-    p=p.t()
-    p1=p.size(0)
-
-    G=torch.tensor(G);
-    if(p1==1):
-       G=G.t()
-    
-    gx=G.size(0)
-    gy=G.size(1)
-    
-    h = torch.tensor(np.zeros((gx, 1)));
-    
-    
-    temp=np.zeros((1,n))
-    temp[0,n-1]=.000000001
-
-    A = torch.from_numpy(temp);
-    b = torch.from_numpy(np.zeros((1,1)));
-    return Q, p, G, h, A, b, m
 
 if __name__ == '__main__':
     main()
