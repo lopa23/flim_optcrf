@@ -9,6 +9,7 @@ from skimage.transform import rescale, resize
 import scipy.io
 import h5py
 import tables
+from torch.utils.data import DataLoader
 
 def kron(matrix1, matrix2):
     """
@@ -28,13 +29,14 @@ def kron(matrix1, matrix2):
     
 def repeat_along_diag(a, r):
     m,n = a.shape
+   
     out = np.zeros((r,m,r,n), dtype=float)
     diag = np.einsum('ijik->ijk',out)
     diag[:] = (a)
     return out.reshape(-1,n*r)
 
-def read_mat_file():
-    fname='../mycode/H.mat'
+def read_mat_file(fname):
+   
     file = tables.open_file(fname)
     Q = file.root.HH[:]
     p=file.root.f[:]
@@ -79,6 +81,7 @@ class MyDataset(Dataset):
         idx=0
         
         for folname in os.listdir(data_root):
+            
             self.train_folder.append(os.path.join(self.data_root, folname))
             print(self.train_folder[idx])
             for thisfile in os.listdir(self.train_folder[idx]):
@@ -86,11 +89,12 @@ class MyDataset(Dataset):
             
                 if(this_filepath.find('image.bmp')!=-1):
                     img= mpimg.imread(this_filepath);
+                    img=img.astype(np.float32)
                     img=torch.from_numpy(img)
                     #img=img.unsqueeze(0)
                     
                 elif(this_filepath.find('truth.bmp')!=-1):
-                    target= mpimg.imread(this_filepath)
+                    target= torch.from_numpy(mpimg.imread(this_filepath))
                    
                 elif(this_filepath.find('.txt')!=-1):
                    
@@ -98,30 +102,54 @@ class MyDataset(Dataset):
                     p1, p2=label.shape
                     if(p2>1):
                         Pixel_pos=torch.from_numpy(label[:,[0, 1]])
-                        Pixel_pos=Pixel_pos.type(torch.uint8).cuda()
+                        Pixel_pos=Pixel_pos.type(torch.uint8)
                         anno=torch.from_numpy(label[:,2])
                         
                     else:
                         Pixel_pos=None
                         anno=torch.from_numpy(label)
                 elif(this_filepath.find('.mat')!=-1):
-                    Q, p, G, h, A, b, m=read_mat_file()
-          
-            self.samples.append({'image': img, 'target': target, 'Anno':anno, 'Pixel_pos':Pixel_pos, 'Q':Q, 'p':p, 'G':G, 'h':h, 'm':m})
-            
+                    Q, p, G, h, A, b, m=read_mat_file(this_filepath)
+            idx=idx+1
+            item=(img, target, anno, Pixel_pos, Q, p, G, h, m)
+           
+            self.samples.append(item)
+            #self.samples.append({'image': img, 'target': target, 'Anno':anno, 'Pixel_pos':Pixel_pos, 'Q':Q, 'p':p, 'G':G, 'h':h, 'm':m})
+        
             
     def __len__(self):
         return len(self.samples)
 
     def __getitem__(self, idx):
         return idx, self.samples[idx]
+    
+"""def my_collate(batch):
+    
+    for this_batch in batch:
+        item = this_batch[1]
+        img=item[0]
+        target=item[1]
+        
+        anno = item[2]
+        Pixel_pos = item[3]
+        Q = item[4]
+        p = item[5]
+        G = item[6]
+        h = item[7]
+        m = item[8]
+   
+    return [img, target, anno, Pixel_pos, Q, p, G, h, m]
 
 def main():
-    dataset = MyDataset('../0ng/export_modified/train/')
-    print(len(dataset))
-    s1=dataset[0]
-    print(s1['image'].shape)
+    #dataset = MyDataset('../0ng/export_modified/train/')
+    traindataset = MyDataset(('../0ng/export_modified/train/'))
+   
+    train_loader = DataLoader(traindataset, batch_size=1,num_workers=0,collate_fn=my_collate)
+    it=iter(train_loader)
+    (img, target, anno, Pixel_pos, Q, p, G, h, m)=next(it)
     
-#main()
+    print(img.size(),Pixel_pos.size())
+    
+main()"""
 
 

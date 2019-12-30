@@ -65,7 +65,7 @@ for i=margin:n-margin
        
         
         %%I(i-margin+1,j-margin+1,:)=z;%%changed
-        I(i,j,:)=z;
+        I(
     end      
 end    
 
@@ -117,12 +117,14 @@ display('Number of label of each class')
 [numel(find(Label==1)) numel(find(Label==0))]
 
 ind_list=sub2ind([Nsize Nsize],Index(:,1),Index(:,2));
+[Index ind_list]
 F=reshape(F,Nsize*Nsize, Nsize);
 
-%%I=reshape(I,N1*M1, Nsize);%%for bin=2 changed
-I=reshape(I,Nsize*Nsize, Nsize);
-
+I=reshape(I,N1*M1, Nsize);%%for bin=2
 F=F(ind_list,:);
+max(ind_list)
+size(I)
+size(ind_list)
 I=I(ind_list,:);
 
 %Label=BWmask_vec(ind_list);

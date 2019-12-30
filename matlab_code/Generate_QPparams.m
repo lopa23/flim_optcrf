@@ -42,7 +42,7 @@ end
 if(m>1)
     n=size(H,1);
     
-    Hkron = kron(eye(m),H);
+    %Hkron = kron(eye(m),H);
     f1=f';
     f_save=f;
     f=f1(:);

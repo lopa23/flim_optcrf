@@ -77,7 +77,7 @@ def forward(Q, p, G, h, A, b, Q_LU, S_LU, R, eps=1e-12, verbose=1, notImprovedLi
         assert False
 
     # Make all of the slack variables >= 1.
-    print("Done with 1st solve_KKT");
+    #print("Done with 1st solve_KKT");
     
     M = torch.min(s, 1)[0]
     #print(s,M.size())
@@ -380,7 +380,7 @@ def factor_solve_kkt(Q, D, G, A, rx, rs, rz, ry):
     t_ = torch.bmm(A_,invH_g_.unsqueeze(1)).squeeze(1) - h_#changed from torch.bmm(invH_g_.unsqueeze(1), A_.transpose(1, 2)).squeeze(1) - h_
     
     w_ = -t_.lu_solve(*S_LU).squeeze(2)#changed
-    print(g_.size(),w_.size(),A_.size())
+    #print(g_.size(),w_.size(),A_.size())
     t_ = -g_ - w_.bmm(A_).squeeze()
     v_ = t_.unsqueeze(2).lu_solve(*H_LU).squeeze(2)
 
@@ -397,13 +397,13 @@ def solve_kkt(Q_LU, d, G, A, S_LU, rx, rs, rz, ry):
     nineq, nz, neq, nBatch = get_sizes(G, A)
     qlu, pivots=Q_LU
     #print("InEq cons, nz, eq cons, btch",nineq, nz, neq, nBatch) #how is G changing dim to 3D
-    print("Now in solve KKt", G.size(),rx.size(), qlu.size())
+    #print("Now in solve KKt", G.size(),rx.size(), qlu.size())
     if G.size(1)>=2:
         invQ_rx = rx.unsqueeze(2).lu_solve(*Q_LU).squeeze(2)
     else:
         invQ_rx = rx.unsqueeze(2).lu_solve(*Q_LU).squeeze(2)
 
-    print("Size after",invQ_rx.size(),G.size(),rs.size(),rz.size())
+    #print("Size after",invQ_rx.size(),G.size(),rs.size(),rz.size())
     
     if neq > 0:
         h = torch.cat((invQ_rx.unsqueeze(1).bmm(A.transpose(1, 2)).squeeze(1) - ry,
@@ -440,7 +440,7 @@ def solve_kkt(Q_LU, d, G, A, S_LU, rx, rs, rz, ry):
     ds = g2 / d
     dz = w[:, neq:]
     dy = w[:, :neq] if neq > 0 else None
-    print("Done Solve KKT");
+   # print("Done Solve KKT");
     return dx, ds, dz, dy
 
 

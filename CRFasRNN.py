@@ -15,6 +15,7 @@ from Permutohedral_Filtering import PermutohedralLayer
 import matplotlib.image as mpimg
 from matplotlib import pyplot as plt
 from skimage.transform import rescale, resize
+
 import math
 
 class CRFasRNN(nn.Module):
@@ -75,6 +76,7 @@ class CRFasRNN(nn.Module):
 
         self.bilateral_filter = PermutohedralLayer(
             bilateral=True,
+            
             theta_alpha=self.theta_alpha,
             theta_beta=self.theta_beta,
             theta_gamma=self.theta_gamma
@@ -133,7 +135,7 @@ class CRFasRNN(nn.Module):
         # calculate the unaries
         
         #unaries = self.network(image)##changed by me
-        #unaries=image.unsqueeze(0).cuda()
+        image=image.unsqueeze(0)
         unaries=generate_unaries(image,anno, Pixel_pos)
        
         unaries=unaries.unsqueeze(0).cuda()
@@ -144,13 +146,14 @@ class CRFasRNN(nn.Module):
             unaries = unaries.cuda(self.gpu)
 
         # set the q_values
+        features=features.type(torch.FloatTensor).unsqueeze(0)
         feat = features.cuda(0)
         q_values = unaries
         softmax_out = self.softmax(q_values)
-
+        
         #
-        #self.nb_iterations=1;
-        #print(q_values,softmax_out)
+        self.nb_iterations=5;
+        print(q_values,softmax_out)
         for i in range(self.nb_iterations):
             print("Iteration",i)
             # 1. Filtering
@@ -160,20 +163,29 @@ class CRFasRNN(nn.Module):
                 softmax_out,
                 feat
             )
-            #print(self.bilateral_filter)
+            
+            #print(image.type(),softmax_out.type(), feat.size(),spatial_out.size())
+            #S=spatial_out[0,0,:,:]
+            #S=S.squeeze(0)
+            #S1=softmax_out[0,0,:,:]
+            #S1=S1.squeeze(0)
+            
+            #
+            #plt.imsave('../0ng/export_modified/train/im4/output/softmax_out.png',S1.cpu().detach().numpy())
+            
             # 1.2 bilateral filtering
-            #bilateral_out=torch.zeros(spatial_out.size(),requires_grad=True)
-            #bilateral_out.retain_grad()
-            #N_softmax_out=torch.ones(softmax_out.size()).cuda()
+            
             bilateral_out = self.bilateral_filter(
                 softmax_out,
                 feat
             )
-            
-            #print(bilateral_out.requires_grad,bilateral_out.grad_fn,bilateral_out)
+            #S=bilateral_out[0,0,:,:]
+            #S=S.squeeze(0)
+            #plt.imsave('../0ng/export_modified/train/im4/output/bilay_out.png',S.cpu().detach().numpy())
+            print(bilateral_out)
             # 2. weighted filter outputs
            
-            message_passing = self.spatial_conv(spatial_out) #+ self.bilateral_conv(bilateral_out)
+            message_passing = self.spatial_conv(spatial_out) + self.bilateral_conv(bilateral_out)
            
             # 3. compatibilty transform
             
@@ -188,6 +200,8 @@ class CRFasRNN(nn.Module):
             y = self.out_act(softmax_out)
             y = self.out_act1(-1*y)
             
+        #print(y.size())
+      
         return y#softmax_out
 
     def crf_dict(self):
@@ -240,7 +254,7 @@ def generate_unaries(img,anno,Pixel_pos):
     n_energy = -math.log((1.0 - GT_PROB)/(M-1));
     p_energy = -math.log(GT_PROB);
     label=[10, 120];
-    unaries=(torch.zeros(2,n[1],n[2]));
+    unaries=torch.zeros([2,n[1],n[2]],dtype=torch.float32);
     #unaries[1,:,:]=torch.ones(1,n[1],n[2]);
     if(Pixel_pos is None):
         for i  in range(0,n[1]):
@@ -260,12 +274,12 @@ def generate_unaries(img,anno,Pixel_pos):
             y=y.item()
             #print(k,x,y,anno[k])
             if(anno[k]==0):
-                unaries[0,x-1,y-1]=p_energy - math.log(math.exp(-pow(img[0,x-1,y-1]-label[0],2)/pow(100,2)))
-                unaries[1,x-1,y-1]=n_energy- math.log(math.exp(-pow(img[0,x-1,y-1]-label[1],2)/pow(100,2)))
+                unaries[0,x-1,y-1]=1000*(p_energy - math.log(math.exp(-pow(img[0,x-1,y-1]-label[0],2)/pow(100,2))))
+                unaries[1,x-1,y-1]=(n_energy- math.log(math.exp(-pow(img[0,x-1,y-1]-label[1],2)/pow(100,2))))
                # print(unaries[[0,1],x-1,y-1],img[0,x-1,y-1])
             elif(anno[k]==1):
-                unaries[1,x-1,y-1]=p_energy- math.log(math.exp(-pow(img[0,x-1,y-1]-label[1],2)/pow(100,2)))
-                unaries[0,x-1,y-1]=n_energy- math.log(math.exp(-pow(img[0,x-1,y-1]-label[0],2)/pow(100,2)))
+                unaries[1,x-1,y-1]=(p_energy- math.log(math.exp(-pow(img[0,x-1,y-1]-label[1],2)/pow(100,2))))
+                unaries[0,x-1,y-1]=1000*(n_energy- math.log(math.exp(-pow(img[0,x-1,y-1]-label[0],2)/pow(100,2))))
                 #print(unaries[[0,1],x,y],img[0,x-1,y-1])
             
     #unaries[1,:,:]=20-img[0,:,:]#1 for images in 0-1 range
