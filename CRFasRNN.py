@@ -100,11 +100,11 @@ class CRFasRNN(nn.Module):
 
         # push all the thing to the gpu
         if self.use_gpu:
-            self.bilateral_conv.cuda(gpu_rnn)
-            self.compatitblity_conv.cuda(gpu_rnn)
-            self.bilateral_filter.cuda(gpu_rnn)
-            self.spatial_conv.cuda(gpu_rnn)
-            self.spatial_filter.cuda(gpu_rnn)
+            self.bilateral_conv.cuda(0)
+            self.compatitblity_conv.cuda(0)
+            self.bilateral_filter.cuda(0)
+            self.spatial_conv.cuda(0)
+            self.spatial_filter.cuda(0)
             
          
         # check whether crf should be updated
@@ -122,6 +122,7 @@ class CRFasRNN(nn.Module):
         self.softmax.requires_grad=True
         self.out_act = nn.Threshold(.5,0)
         self.out_act1 = nn.Threshold(-0.000001,1)
+        self.out_act2=nn.Threshold(.000001,0)
         
     def forward(
             self,
@@ -146,14 +147,16 @@ class CRFasRNN(nn.Module):
             unaries = unaries.cuda(self.gpu)
 
         # set the q_values
-        features=features.type(torch.FloatTensor).unsqueeze(0)
-        feat = features.cuda(0)
+        features=features.type(torch.float32).unsqueeze(0)
+        feat=features.detach()
+        feat=feat.requires_grad_(False)
+        
         q_values = unaries
         softmax_out = self.softmax(q_values)
-        
+        softmax_out=softmax_out.type(torch.float32).cuda(0)
         #
-        self.nb_iterations=5;
-        print(q_values,softmax_out)
+        self.nb_iterations=3;
+        #print(feat)
         for i in range(self.nb_iterations):
             print("Iteration",i)
             # 1. Filtering
@@ -163,26 +166,21 @@ class CRFasRNN(nn.Module):
                 softmax_out,
                 feat
             )
+            spatial_out=spatial_out.cuda(0)
             
-            #print(image.type(),softmax_out.type(), feat.size(),spatial_out.size())
-            #S=spatial_out[0,0,:,:]
-            #S=S.squeeze(0)
-            #S1=softmax_out[0,0,:,:]
-            #S1=S1.squeeze(0)
             
-            #
-            #plt.imsave('../0ng/export_modified/train/im4/output/softmax_out.png',S1.cpu().detach().numpy())
+            print(softmax_out,feat)
+            #softmax_out = self.out_act2(softmax_out)
             
             # 1.2 bilateral filtering
-            
             bilateral_out = self.bilateral_filter(
                 softmax_out,
                 feat
             )
-            #S=bilateral_out[0,0,:,:]
-            #S=S.squeeze(0)
-            #plt.imsave('../0ng/export_modified/train/im4/output/bilay_out.png',S.cpu().detach().numpy())
+            #bilateral_out=bilateral_out.type(torch.FloatTensor).cuda(0)
             print(bilateral_out)
+            bilateral_out[torch.isnan(bilateral_out)]=0
+            
             # 2. weighted filter outputs
            
             message_passing = self.spatial_conv(spatial_out) + self.bilateral_conv(bilateral_out)
@@ -197,8 +195,11 @@ class CRFasRNN(nn.Module):
 
             # 5. Softmax
             softmax_out = self.softmax(q_values)
+            softmax_out=softmax_out.type(torch.FloatTensor).cuda(0)
+            
+            print(softmax_out)
             y = self.out_act(softmax_out)
-            y = self.out_act1(-1*y)
+            #y = self.out_act1(-1*y)
             
         #print(y.size())
       

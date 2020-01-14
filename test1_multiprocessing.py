@@ -77,17 +77,18 @@ class Ensemble(nn.Module):
         network=torch.rand(1,1,10,10)#random network
         self.opt1 = OptNet(1, 1, 3, 4)#.cuda(0)
         
-        self.opt1.to(device)
+        #self.opt1.to(device)
         self.opt2 = OptNet(1, 1, 3, 4)#.cuda(1)
         
-        self.opt2.to(device)
+        #self.opt2.to(device)
         #self.opt.cuda()
         self.crf = crfrnn(network, 10, 2 , 5, 8, .125, .5, None).cuda(0)
 
-     def process_opt(self, opt, x, Q, p, G, h, m, img, anno, Pixel_pos):
+     def process_opt(self, queue, opt, x, Q, p, G, h, m, img, anno, Pixel_pos,gpu_id):
         n=img.size()
-       
-        output=opt(x,Q,p,G,h,m).float()#.cuda(0)#.to(device)
+        #print(Q,p,G,h,m)
+        torch.cuda.set_device(gpu_id)
+        output=opt(x,Q,p,G,h,m).float().cuda(gpu_id)#.to(device)
         
         output=-1*output.view(10,-1)
        
@@ -101,22 +102,42 @@ class Ensemble(nn.Module):
         else:
             output=modify_output(output,Pixel_pos,n[1])
         
-        output=output.type(torch.float32)
-                
-        return output
+        #output=output.type(torch.float32)
+        queue.put(output.cpu().detach().numpy().astype(np.float32))
+        
+        #return output
         
      def forward(self, x, Q1, p1,G1,h1,m1,img, anno1,Pixel_pos1, Q2, p2, G2,h2,m2,anno2,Pixel_pos2):
 
-        output1=self.process_opt(self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1)
-        output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
-        output=torch.cat((output1,output2),0).float()
+        #mp.set_start_method('spawn')
+        q=mp.Queue()
+        p1=mp.Process(target=self.process_opt,args=(q, self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1,0))
+        p2=mp.Process(target=self.process_opt,args=(q, self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2,1))
+        
+        p1.start()
+        p2.start()
+        
+        #p1.join()
+        
+        #p2.join()
+        
+        
+        output1=q.get()
+        output1=torch.from_numpy(output1)
+        output2=q.get()
+        output2=torch.from_numpy(output2)
+        
+        
+        #output1=self.process_opt(self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1)
+      
+        #output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
+        output=torch.cat((output1,output2),0).float().cuda(0)
         print(output.size())
-
-        img=img.float()
+        img=img.float().cuda(0)
         
         anno1=anno1.float()
        
-        y=self.crf(img, output, anno1, Pixel_pos1)
+        y=self.crf(img, output, anno1, Pixel_pos1).cuda(0)
         y=y.squeeze(0)
         y=y[0,:,:] #need to look into this
         #print('Final Output',y.size())
@@ -280,7 +301,7 @@ def main():
     faulthandler.enable()
     os.environ['CUDA_VISIBLE_DEVICES']='4,5'
     #torch.cuda.set_device(4)
-    #mp.set_start_method("spawn")
+    mp.set_start_method("spawn")
 
     #print(torch.cuda.current_device())
      ##Setting up parameters
