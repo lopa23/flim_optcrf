@@ -76,7 +76,7 @@ def modify_output(output,Pixel_pos,nsize):
 class Ensemble(nn.Module):
      def __init__(self,optNet,crfrnn):
         super(Ensemble, self).__init__()
-        device=torch.device("cuda:7")
+        device=torch.device("cuda:4")
         network=torch.rand(1,1,10,10)#random network
         self.opt1 = OptNet(1, 1, 3, 4)#.cuda(0)
         
@@ -85,7 +85,7 @@ class Ensemble(nn.Module):
         
         self.opt2.to(device)
         #self.opt.cuda()
-        self.crf = crfrnn(network, 2, 2 , 5, 8, .125, .5, 7).cuda()
+        self.crf = crfrnn(network, 2, 2 , 5, 8, .125, .5, 4).cuda()
 
      def process_opt(self, opt, x, Q, p, G, h, m, img, anno, Pixel_pos):
         n=img.size()
@@ -337,7 +337,7 @@ def  write_output_image(y,filename_save,show):
 def main():
     #faulthandler.enable()
     #os.environ['CUDA_VISIBLE_DEVICES']='1,2,3,4,5'
-    torch.cuda.set_device(7)
+    torch.cuda.set_device(4)
     #mp.set_start_method("spawn")
 
     #print(torch.cuda.current_device())

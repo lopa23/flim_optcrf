@@ -32,6 +32,7 @@ from torch.utils.data import DataLoader
 from skimage.morphology import erosion, dilation, opening, closing
 from skimage.morphology import disk
 from matplotlib import cm
+from Kmeansnet import kmeans
 
 def my_collate(batch):
     
@@ -74,7 +75,7 @@ def modify_output(output,Pixel_pos,nsize):
     return new_output
 
 class Ensemble(nn.Module):
-     def __init__(self,optNet,crfrnn):
+     def __init__(self,optNet,km):
         super(Ensemble, self).__init__()
         device=torch.device("cuda:7")
         network=torch.rand(1,1,10,10)#random network
@@ -85,7 +86,7 @@ class Ensemble(nn.Module):
         
         self.opt2.to(device)
         #self.opt.cuda()
-        self.crf = crfrnn(network, 2, 2 , 5, 8, .125, .5, 7).cuda()
+        self.km = kmeans(2)#.cuda()
 
      def process_opt(self, opt, x, Q, p, G, h, m, img, anno, Pixel_pos):
         n=img.size()
@@ -113,17 +114,24 @@ class Ensemble(nn.Module):
         output1=self.process_opt(self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1)
         output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
         output=torch.cat((output1,output2),0).float()
+        print("size at this point1",output.size())
+        output_k=output.detach().numpy()
+        output_k=output_k.reshape(20,65536)
+        output_k=np.transpose(output_k)
         #output=output1
-
+        print("size at this point2",output_k.size)
         img=img.float()
         
         anno1=anno1.float()
         #y=self.crf(img, anno1,Pixel_pos1)
-        y=self.crf(img, output, anno1, Pixel_pos1)
+        self.km.kmeanstrain(output_k)
+        y=self.km.kmeansfwd(output_k)
+        
+        y=torch.from_numpy(y)
         y=y.squeeze(0)
-        y=y[0,:,:] #need to look into this
+        #y=y[0,:,:] #need to look into this
         #print('Final Output',y.size())
-        p1, p2=y.size()
+        #p1, p2=y.size()
         
         return y, output
 
@@ -193,15 +201,15 @@ def train(net,train_loader,traindataset,data_root_train):
             param.requires_grad = False
     for param in net.opt2.parameters():
             param.requires_grad = False
-    for param in net.crf.parameters():
-            param.requires_grad = False
+    #for param in net.crf.parameters():
+            #param.requires_grad = False
             
     x=torch.tensor(([1., 2., 3., 4., 5., 6.]))
     
     device = torch.device("cuda:7")
     
     optimizer = torch.optim.SGD([
-                {'params':list(net.opt1.parameters())+list(net.opt2.parameters())+list(net.crf.parameters()), 'lr': 1e-3}])
+                {'params':list(net.opt1.parameters())+list(net.opt2.parameters()), 'lr': 1e-3}])
 
     
     y=torch.rand(1,10)
@@ -241,7 +249,7 @@ def train(net,train_loader,traindataset,data_root_train):
         write_output_image(y1,filename_save,False)
 
         #calculating losses
-        target=target.type(torch.float)
+        target=target.type(torch.double)
         criterion=nn.BCELoss()
         loss=criterion(y1,target)
         #loss = F.mse_loss(y, target)
@@ -327,8 +335,15 @@ def test(net,test_loader,data_root_test):
 
 def  write_output_image(y,filename_save,show):
     selem = disk(2)
+    print(y)
+    if(len(y)>1):
+       y=y[1]
+      
     y1=y.cpu().detach().numpy()
-    y1=closing(y1,selem)
+    print("Before resize",y1.size)
+    y1=np.reshape(y1,(-1,256))
+   
+    #y1=closing(y1,selem)
     if (show):
         plt.imshow(y1, interpolation='nearest')
         plt.show()
@@ -353,7 +368,7 @@ def main():
     parser.add_argument('--threads', type=int, default=4, help='Number of threads for data loader to use')
     parser.add_argument('--seed', type=int, default=123, help='Random seed to use. Default=123')
     
-    nEpoch=2
+    nEpoch=4
     parser = argparse.ArgumentParser()
     parser.add_argument('--save', type=str)
     args = parser.parse_args()
@@ -364,10 +379,10 @@ def main():
 
     data_root_train='../tissue_data_2mod/train/'
     data_root_test='../tissue_data_2mod/test/'
-    TR=True # will perform training
-    TT=False # will perform testinf
+    TR=False # will perform training
+    TT=True # will perform testinf
    ##File read and image reads,this needs to be converted to batch mode later on
-    net=Ensemble(OptNet,crfrnn)#.cuda()
+    net=Ensemble(OptNet,kmeans)#.cuda()
     if(TR):
        
         traindataset = MyDataset((data_root_train))
@@ -388,7 +403,7 @@ def main():
         testdataset = MyDataset((data_root_test))
 
         test_loader = DataLoader(testdataset, batch_size=1,num_workers=0,collate_fn=my_collate)
-        net.load_state_dict(torch.load('saved_model/net1.pth'))
+        net.load_state_dict(torch.load('saved_model/net4.pth'))
         y=test(net,test_loader,data_root_test)
        
 if __name__ == '__main__':

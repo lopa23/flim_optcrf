@@ -11,10 +11,8 @@ import torch.nn.functional as F
 import torch.multiprocessing as mp
 import pandas
 import scipy.io
+import h5py
 import os
-import sys
-sys.path.remove('/usr/local/lib/python3.6/dist-packages/')
-print(sys.path)
 #from scipy.linalg import block_diag
 import tables
 import argparse
@@ -25,8 +23,7 @@ import math
 #from . import CRFasRNN as crf
 import sys
 sys.path.insert(0, '.')
-
-from CRFasRNN import CRFasRNN as crfrnn
+from  CRFasRNN import CRFasRNN as crfrnn
 from dataset_reader import MyDataset
 from torch.utils.data import DataLoader
 from skimage.morphology import erosion, dilation, opening, closing
@@ -76,21 +73,23 @@ def modify_output(output,Pixel_pos,nsize):
 class Ensemble(nn.Module):
      def __init__(self,optNet,crfrnn):
         super(Ensemble, self).__init__()
-        device=torch.device("cuda:7")
+        device=torch.device("cuda")
         network=torch.rand(1,1,10,10)#random network
         self.opt1 = OptNet(1, 1, 3, 4)#.cuda(0)
         
-        self.opt1.to(device)
+        #self.opt1.to(device)
         self.opt2 = OptNet(1, 1, 3, 4)#.cuda(1)
         
-        self.opt2.to(device)
+        #self.opt2.to(device)
         #self.opt.cuda()
-        self.crf = crfrnn(network, 2, 2 , 5, 8, .125, .5, 7).cuda()
+        self.crf = crfrnn(network, 10, 2 , 5, 8, .125, .5, None).cuda(0)
 
-     def process_opt(self, opt, x, Q, p, G, h, m, img, anno, Pixel_pos):
+     def process_opt(self, queue, opt, x, Q, p, G, h, m, img, anno, Pixel_pos,gpu_id):
         n=img.size()
-        if(m<5000):
-            output=opt(x,Q,p,G,h,m).float()#.cuda(0)#.to(device)
+        #print(Q,p,G,h,m)
+        torch.cuda.set_device(gpu_id)
+        if(m<7000):
+            output=opt(x,Q,p,G,h,m).float().cuda(gpu_id)#.to(device)
         
             output=-1*output.view(10,-1)
        
@@ -98,41 +97,62 @@ class Ensemble(nn.Module):
         else:
             o=np.random.rand(10,m*10)
             o =np.array(o).astype(np.single)
-            output=torch.from_numpy(o).cuda()
+            output=torch.from_numpy(o).cuda(0)
+        
         if(Pixel_pos is None):
             output=output.view(-1,n[1],n[2]);
         else:
             output=modify_output(output,Pixel_pos,n[1])
         
-        output=output.type(torch.float32)
-                
-        return output
+        #output=output.type(torch.float32)
+        queue.put(output.cpu().detach().numpy().astype(np.float32))
+        return
+        #return output
         
      def forward(self, x, Q1, p1,G1,h1,m1,img, anno1,Pixel_pos1, Q2, p2, G2,h2,m2,anno2,Pixel_pos2):
 
-        output1=self.process_opt(self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1)
-        output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
-        output=torch.cat((output1,output2),0).float()
-        #output=output1
-
-        img=img.float()
+        #mp.set_start_method('spawn')
+        q=mp.Queue()
+        p1=mp.Process(target=self.process_opt,args=(q, self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1,0))
+        p2=mp.Process(target=self.process_opt,args=(q, self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2,1))
+        
+        p1.start()
+        p2.start()
+        
+        
+        
+        
+        output1=q.get()
+        output1=torch.from_numpy(output1)
+        output2=q.get()
+        output2=torch.from_numpy(output2)
+        p1.join()
+        
+        p2.join()
+        
+        #output1=self.process_opt(self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1)
+      
+        #output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
+        output=torch.cat((output1,output2),0).float().cuda(0)
+        print(output.size())
+        img=img.float().cuda(0)
         
         anno1=anno1.float()
-        #y=self.crf(img, anno1,Pixel_pos1)
-        y=self.crf(img, output, anno1, Pixel_pos1)
+       
+        y=self.crf(img, output, anno1, Pixel_pos1).cuda(0)
         y=y.squeeze(0)
         y=y[0,:,:] #need to look into this
         #print('Final Output',y.size())
         p1, p2=y.size()
         
-        return y, output
+        return y
 
     #def main(self):
         #self.init()
 class OptNet(nn.Module):
     def __init__(self, nFeatures, nHidden, nCls, bn, nineq=1, neq=0, eps=1e-4):
         super(OptNet,self).__init__()
-        self.device = torch.device("cuda:4")
+        self.device = torch.device("cuda")
         self.nFeatures = nFeatures
         self.nHidden = nHidden
         self.bn = bn
@@ -198,7 +218,7 @@ def train(net,train_loader,traindataset,data_root_train):
             
     x=torch.tensor(([1., 2., 3., 4., 5., 6.]))
     
-    device = torch.device("cuda:7")
+    device = torch.device("cuda")
     
     optimizer = torch.optim.SGD([
                 {'params':list(net.opt1.parameters())+list(net.opt2.parameters())+list(net.crf.parameters()), 'lr': 1e-3}])
@@ -209,12 +229,10 @@ def train(net,train_loader,traindataset,data_root_train):
     it=iter(train_loader)
     for i in range(0,len(train_loader.dataset)):
         fol_name=os.path.join(data_root_train, follist_train[i])
-        print(fol_name)
         if not os.path.exists(os.path.join(fol_name,'output/')):
             os.makedirs(os.path.join(fol_name,'output/'))
                               
         filename_save=os.path.join(fol_name,'output/output.png')
-        filename_save_opt=os.path.join(fol_name,'output/opt_output.mat')
         optimizer.zero_grad()
         (img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1, anno2, Pixel_pos2, Q2, p2, G2, h2, m2)=next(it)
        
@@ -233,37 +251,20 @@ def train(net,train_loader,traindataset,data_root_train):
         G2=G2.squeeze(0)
         h2=h2.squeeze(0)
     
-        y, opt_output=net(x,Q1,p1,G1,h1,m1,img, anno1,Pixel_pos1,Q2,p2,G2,h2,m2,anno2,Pixel_pos2)
-        #writing both outputs to files
-        y1=y.detach().cpu()
-        opt_output1=opt_output.detach().numpy()
-        scipy.io.savemat(filename_save_opt,{'opt_out':opt_output1})
-        write_output_image(y1,filename_save,False)
-
-        #calculating losses
-        target=target.type(torch.float)
+        y=net(x,Q1,p1,G1,h1,m1,img, anno1,Pixel_pos1,Q2,p2,G2,h2,m2,anno2,Pixel_pos2)
+      
+        write_output_image(y,filename_save,False)
+        
+        target=target.type(torch.float).cuda()
         criterion=nn.BCELoss()
-        loss=criterion(y1,target)
+        loss=criterion(y,target)
         #loss = F.mse_loss(y, target)
         loss = Variable(loss, requires_grad = True)
         # make_graph.save('/tmp/t.dot', loss.creator); assert(False)
         print("Loss value",loss.item())
         loss.backward()
         optimizer.step()
-        """del(Q1)
-        del(G1)
-        del(Q2)
-        del(G2)
-        del(p1)
-        del(p2)
-        del(h1)
-        del(h2)
-        del(anno1)
-        del(anno2)
-        del(Pixel_pos1)
-        del(Pixel_pos2)
-        torch.cuda.empty_cache()
-        """
+
     return y
 
 def test(net,test_loader,data_root_test):
@@ -277,7 +278,6 @@ def test(net,test_loader,data_root_test):
    
     for i in range(0,len(test_loader.dataset)):
         fol_name=os.path.join(data_root_test, follist_test[i])
-        print(fol_name)
         if not os.path.exists(os.path.join(fol_name,'output/')):
             os.makedirs(os.path.join(fol_name,'output/'))
                               
@@ -309,20 +309,8 @@ def test(net,test_loader,data_root_test):
       
         write_output_image(output,filename_save,False)
         ##add code to test the output wrt to target
-        """ del(Q1)
-        del(G1)
-        del(Q2)
-        del(G2)
-        del(p1)
-        del(p2)
-        del(h1)
-        del(h2)
-        del(anno1)
-        del(anno2)
-        del(Pixel_pos1)
-        del(Pixel_pos2)
-        torch.cuda.empty_cache()
-       """ 
+
+    
     return output
 
 def  write_output_image(y,filename_save,show):
@@ -335,10 +323,10 @@ def  write_output_image(y,filename_save,show):
     plt.imsave(filename_save,np.uint8(y1),cmap = cm.gray)
     
 def main():
-    #faulthandler.enable()
-    #os.environ['CUDA_VISIBLE_DEVICES']='1,2,3,4,5'
-    torch.cuda.set_device(7)
-    #mp.set_start_method("spawn")
+    faulthandler.enable()
+    os.environ['CUDA_VISIBLE_DEVICES']='4,5'
+    #torch.cuda.set_device(4)
+    mp.set_start_method("spawn")
 
     #print(torch.cuda.current_device())
      ##Setting up parameters
@@ -353,7 +341,7 @@ def main():
     parser.add_argument('--threads', type=int, default=4, help='Number of threads for data loader to use')
     parser.add_argument('--seed', type=int, default=123, help='Random seed to use. Default=123')
     
-    nEpoch=2
+    nEpoch=1
     parser = argparse.ArgumentParser()
     parser.add_argument('--save', type=str)
     args = parser.parse_args()
@@ -361,35 +349,34 @@ def main():
     if args.save is None:
         t = '{}.{}'.format('mydata', 'optnet')
     args.save = os.path.join('work', t)
-
+    
+   ##File read and image reads,this needs to be converted to batch mode later on
+ 
     data_root_train='../tissue_data_2mod/train/'
     data_root_test='../tissue_data_2mod/test/'
-    TR=True # will perform training
-    TT=False # will perform testinf
-   ##File read and image reads,this needs to be converted to batch mode later on
-    net=Ensemble(OptNet,crfrnn)#.cuda()
-    if(TR):
-       
-        traindataset = MyDataset((data_root_train))
-        train_loader = DataLoader(traindataset, batch_size=1,  collate_fn=my_collate)#pin_memory=True, num_workers=0,
-        for epoch in range(1, nEpoch + 1):
-        
-            print("Epoch ", epoch)
-    
-            y=train(net,train_loader,traindataset,data_root_train)
-            
-            fname='saved_model/net'+str(epoch)+'.pth'
-            torch.save(net.state_dict(),fname)
-            
-        
-        
-        
-    if(TT):
-        testdataset = MyDataset((data_root_test))
+    traindataset = MyDataset(data_root_train)
+    train_loader = DataLoader(traindataset, batch_size=1,num_workers=0,collate_fn=my_collate)
 
-        test_loader = DataLoader(testdataset, batch_size=1,num_workers=0,collate_fn=my_collate)
-        net.load_state_dict(torch.load('saved_model/net1.pth'))
-        y=test(net,test_loader,data_root_test)
+    testdataset = MyDataset((data_root_test))
+
+    test_loader = DataLoader(testdataset, batch_size=1,num_workers=0,collate_fn=my_collate)
+    ##end of file read
+     
+    net=Ensemble(OptNet,crfrnn)#.cuda()
+
+    
+    
+    follist_test= os.listdir(data_root_test)
+    print("in main")
+    
+    for epoch in range(1, nEpoch + 1):
+        
+        print("Epoch ", epoch)
+    
+        y=train(net,train_loader,traindataset,data_root_train)
+        
+  
+    y=test(net,test_loader,data_root_test)
        
 if __name__ == '__main__':
     main()

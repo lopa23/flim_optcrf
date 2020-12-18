@@ -88,23 +88,30 @@ class MyDataset(Dataset):
         for folname in os.listdir(data_root):
             
             self.train_folder.append(os.path.join(self.data_root, folname))
-            print(self.train_folder[0])
+            print(self.train_folder[idx])
             subfolnames=os.listdir(self.train_folder[idx]);
             idx1=0
             # this is to avoid reading the output folder
+            type='nadh'
+            index_of_type=-1
             for folname in subfolnames:
-                  if folname !='output':
-                      subfolnames[idx1]=folname
-                      idx1=idx1+1
+        
+                 if folname !='output':
+                    if(folname.find(type)!=-1):
+                         index_of_type=idx1
+                
+                    subfolnames[idx1]=folname
+                    idx1=idx1+1
                       
-            subfol_path1=os.path.join(self.train_folder[idx],subfolnames[0]);
-            subfol_path2=os.path.join(self.train_folder[idx],subfolnames[1]);
-            print(subfol_path1,' ',subfol_path2)
+                      
+            subfol_path1=os.path.join(self.train_folder[idx],subfolnames[index_of_type]); #change this to subfolnames[1] for nadh
+            
+            print('Subfolder are',subfol_path1)
             #reading 1st modality
             for thisfile in os.listdir(subfol_path1):
                 
                 this_filepath = os.path.join(subfol_path1, thisfile)
-            
+                
                 if(this_filepath.find('image.bmp')!=-1):
                     img= mpimg.imread(this_filepath);
                     if(img.ndim >2):
@@ -132,29 +139,10 @@ class MyDataset(Dataset):
                    
                     Q1, p1, G1, h1, A1, b1, m1=read_mat_file(this_filepath)
                    
-            #reading 2nd modality
-            for thisfile in os.listdir(subfol_path2):
-                
-                this_filepath = os.path.join(subfol_path2, thisfile)
-            
-                if(this_filepath.find('.txt')!=-1):
-                   
-                    label = np.loadtxt(this_filepath, dtype='i', delimiter=',')
-                    n1, n2=label.shape
-                    if(n2>1):
-                        Pixel_pos2=torch.from_numpy(label[:,[0, 1]])
-                        Pixel_pos2=Pixel_pos2.type(torch.uint8)
-                        anno2=torch.from_numpy(label[:,2])
-                    
-                    else:
-                        Pixel_pos2=None
-                        anno2=torch.from_numpy(label)
-                elif(this_filepath.find('.mat')!=-1):
-                    Q2, p2, G2, h2, A2, b2, m2=read_mat_file(this_filepath)
-                
+                            
             idx=idx+1
            
-            item=(img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1, anno2, Pixel_pos2, Q2, p2, G2, h2, m2)
+            item=(img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1)
            
             self.samples.append(item)
             #self.samples.append({'image': img, 'target': target, 'Anno':anno, 'Pixel_pos':Pixel_pos, 'Q':Q, 'p':p, 'G':G, 'h':h, 'm':m})

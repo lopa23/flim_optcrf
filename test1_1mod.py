@@ -27,7 +27,7 @@ import sys
 sys.path.insert(0, '.')
 
 from CRFasRNN import CRFasRNN as crfrnn
-from dataset_reader import MyDataset
+from dataset_reader_1mod import MyDataset
 from torch.utils.data import DataLoader
 from skimage.morphology import erosion, dilation, opening, closing
 from skimage.morphology import disk
@@ -48,15 +48,7 @@ def my_collate(batch):
         h1 = item[7]
         m1 = item[8]
 
-        anno2 = item[9]
-        Pixel_pos2 = item[10]
-        Q2 = item[11]
-        p2 = item[12]
-        G2 = item[13]
-        h2 = item[14]
-        m2 = item[15]
-   
-    return [img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1, anno2, Pixel_pos2, Q2, p2, G2, h2, m2]
+        return [img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1]
 
 def modify_output(output,Pixel_pos,nsize):
     n1, n2=output.size()
@@ -81,11 +73,11 @@ class Ensemble(nn.Module):
         self.opt1 = OptNet(1, 1, 3, 4)#.cuda(0)
         
         self.opt1.to(device)
-        self.opt2 = OptNet(1, 1, 3, 4)#.cuda(1)
+        #self.opt2 = OptNet(1, 1, 3, 4)#.cuda(1)
         
-        self.opt2.to(device)
+        #self.opt2.to(device)
         #self.opt.cuda()
-        self.crf = crfrnn(network, 2, 2 , 5, 8, .125, .5, 7).cuda()
+        self.crf = crfrnn(network, 2, 2 , 5, 8, .125, .5, 7).cuda()#the last 1 is the gpu id for crf rnn
 
      def process_opt(self, opt, x, Q, p, G, h, m, img, anno, Pixel_pos):
         n=img.size()
@@ -108,12 +100,12 @@ class Ensemble(nn.Module):
                 
         return output
         
-     def forward(self, x, Q1, p1,G1,h1,m1,img, anno1,Pixel_pos1, Q2, p2, G2,h2,m2,anno2,Pixel_pos2):
+     def forward(self, x, Q1, p1,G1,h1,m1,img, anno1,Pixel_pos1):
 
         output1=self.process_opt(self.opt1, x, Q1, p1, G1, h1, m1, img, anno1, Pixel_pos1)
-        output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
-        output=torch.cat((output1,output2),0).float()
-        #output=output1
+        #output2=self.process_opt(self.opt2, x, Q2, p2, G2, h2, m2, img, anno2, Pixel_pos2)
+        #output=torch.cat((output1,output2),0).float()
+        output=output1
 
         img=img.float()
         
@@ -132,7 +124,7 @@ class Ensemble(nn.Module):
 class OptNet(nn.Module):
     def __init__(self, nFeatures, nHidden, nCls, bn, nineq=1, neq=0, eps=1e-4):
         super(OptNet,self).__init__()
-        self.device = torch.device("cuda:4")
+        self.device = torch.device("cuda:7")
         self.nFeatures = nFeatures
         self.nHidden = nHidden
         self.bn = bn
@@ -191,8 +183,8 @@ def train(net,train_loader,traindataset,data_root_train):
     follist_train= os.listdir(data_root_train)
     for param in net.opt1.parameters():
             param.requires_grad = False
-    for param in net.opt2.parameters():
-            param.requires_grad = False
+    #for param in net.opt2.parameters():
+           # param.requires_grad = False
     for param in net.crf.parameters():
             param.requires_grad = False
             
@@ -201,7 +193,7 @@ def train(net,train_loader,traindataset,data_root_train):
     device = torch.device("cuda:7")
     
     optimizer = torch.optim.SGD([
-                {'params':list(net.opt1.parameters())+list(net.opt2.parameters())+list(net.crf.parameters()), 'lr': 1e-3}])
+                {'params':list(net.opt1.parameters())+list(net.crf.parameters()), 'lr': 1e-3}])
 
     
     y=torch.rand(1,10)
@@ -216,7 +208,7 @@ def train(net,train_loader,traindataset,data_root_train):
         filename_save=os.path.join(fol_name,'output/output.png')
         filename_save_opt=os.path.join(fol_name,'output/opt_output.mat')
         optimizer.zero_grad()
-        (img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1, anno2, Pixel_pos2, Q2, p2, G2, h2, m2)=next(it)
+        (img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1)=next(it)
        
         target=target.squeeze(0)
         anno1=anno1.squeeze(0)
@@ -226,14 +218,8 @@ def train(net,train_loader,traindataset,data_root_train):
         p1=p1.squeeze(0)
         G1=G1.squeeze(0)
         h1=h1.squeeze(0)
-        anno2=anno2.squeeze(0)
-        Pixel_pos2=Pixel_pos2.squeeze(0)
-        Q2=Q2.squeeze(0)
-        p2=p2.squeeze(0)
-        G2=G2.squeeze(0)
-        h2=h2.squeeze(0)
-    
-        y, opt_output=net(x,Q1,p1,G1,h1,m1,img, anno1,Pixel_pos1,Q2,p2,G2,h2,m2,anno2,Pixel_pos2)
+            
+        y, opt_output=net(x,Q1,p1,G1,h1,m1,img, anno1,Pixel_pos1)
         #writing both outputs to files
         y1=y.detach().cpu()
         opt_output1=opt_output.detach().numpy()
@@ -283,7 +269,7 @@ def test(net,test_loader,data_root_test):
                               
         filename_save=os.path.join(fol_name,'output/output.png')
        
-        (img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1, anno2, Pixel_pos2, Q2, p2, G2, h2, m2)=next(it)
+        (img, target, anno1, Pixel_pos1, Q1, p1, G1, h1, m1)=next(it)
        
         target=target.squeeze(0)
         anno1=anno1.squeeze(0)
@@ -293,19 +279,10 @@ def test(net,test_loader,data_root_test):
         p1=p1.squeeze(0)
         G1=G1.squeeze(0)
         h1=h1.squeeze(0)
-        anno2=anno2.squeeze(0)
-        Pixel_pos2=Pixel_pos2.squeeze(0)
-        Q2=Q2.squeeze(0)
-        p2=p2.squeeze(0)
-        G2=G2.squeeze(0)
-        h2=h2.squeeze(0)
-
-    
-    
         print("Here in test, data read", fol_name)
     
    
-        output = net(x,Q1,p1,G1,h1,m1,img, anno1, Pixel_pos1,Q2,p2,G2,h2,m2,anno2,Pixel_pos2)
+        output = net(x,Q1,p1,G1,h1,m1,img, anno1, Pixel_pos1)
       
         write_output_image(output,filename_save,False)
         ##add code to test the output wrt to target
@@ -327,8 +304,14 @@ def test(net,test_loader,data_root_test):
 
 def  write_output_image(y,filename_save,show):
     selem = disk(2)
+    if type(y)==tuple:
+      y=y[0]
+      
+    #print(y)
     y1=y.cpu().detach().numpy()
-    y1=closing(y1,selem)
+    
+    
+    #y1=closing(y1,selem)
     if (show):
         plt.imshow(y1, interpolation='nearest')
         plt.show()
@@ -353,7 +336,7 @@ def main():
     parser.add_argument('--threads', type=int, default=4, help='Number of threads for data loader to use')
     parser.add_argument('--seed', type=int, default=123, help='Random seed to use. Default=123')
     
-    nEpoch=2
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--save', type=str)
     args = parser.parse_args()
@@ -364,8 +347,9 @@ def main():
 
     data_root_train='../tissue_data_2mod/train/'
     data_root_test='../tissue_data_2mod/test/'
-    TR=True # will perform training
-    TT=False # will perform testinf
+    nEpoch=1
+    TR=False # will perform training
+    TT=True # will perform testinf
    ##File read and image reads,this needs to be converted to batch mode later on
     net=Ensemble(OptNet,crfrnn)#.cuda()
     if(TR):
@@ -373,7 +357,7 @@ def main():
         traindataset = MyDataset((data_root_train))
         train_loader = DataLoader(traindataset, batch_size=1,  collate_fn=my_collate)#pin_memory=True, num_workers=0,
         for epoch in range(1, nEpoch + 1):
-        
+
             print("Epoch ", epoch)
     
             y=train(net,train_loader,traindataset,data_root_train)

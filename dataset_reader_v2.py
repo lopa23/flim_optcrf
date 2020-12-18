@@ -53,7 +53,7 @@ def read_mat_file(fname):
     
     Q=torch.tensor(Q).float();
     E=torch.eye(m)
-    Q=torch.from_numpy(kron(E,Q)).float()
+    #Q=torch.from_numpy(kron(E,Q)).float()
     print("Size m, Q",m, Q.size())
     
     n=Q.size(0)

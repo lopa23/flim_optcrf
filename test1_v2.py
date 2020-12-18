@@ -27,12 +27,35 @@ import sys
 sys.path.insert(0, '.')
 
 from CRFasRNN import CRFasRNN as crfrnn
-from dataset_reader import MyDataset
+from dataset_reader_v2 import MyDataset
 from torch.utils.data import DataLoader
 from skimage.morphology import erosion, dilation, opening, closing
 from skimage.morphology import disk
 from matplotlib import cm
 
+def kron(matrix1, matrix2):
+    """
+    Kronecker product of matrices a and b with leading batch dimensions.
+    Batch dimensions are broadcast. The number of them mush
+    :type a: torch.Tensor
+    :type b: torch.Tensor
+    :rtype: torch.Tensor
+    """
+    r=matrix1.size(0)
+    R=repeat_along_diag(matrix2,r)
+    
+    #R=torch.zeros(n*m,n*m)
+
+    return R
+   
+   
+def repeat_along_diag(a, r):
+    m,n = a.shape
+   
+    out = np.zeros((r,m,r,n), dtype=np.float32)
+    diag = np.einsum('ijik->ijk',out)
+    diag[:] = (a)
+    return out.reshape(-1,n*r)
 def my_collate(batch):
     
     for this_batch in batch:
@@ -90,8 +113,12 @@ class Ensemble(nn.Module):
      def process_opt(self, opt, x, Q, p, G, h, m, img, anno, Pixel_pos):
         n=img.size()
         if(m<5000):
-            output=opt(x,Q,p,G,h,m).float()#.cuda(0)#.to(device)
-        
+            
+            E=torch.eye(m)
+            Q1=torch.from_numpy(kron(E,Q)).float()
+            
+            output=opt(x,Q1,p,G,h,m).float()#.cuda(0)#.to(device)
+            del Q1
             output=-1*output.view(10,-1)
        
             output=output/torch.max(output)
@@ -327,6 +354,8 @@ def test(net,test_loader,data_root_test):
 
 def  write_output_image(y,filename_save,show):
     selem = disk(2)
+    if type(y)==tuple:
+      y=y[0]
     y1=y.cpu().detach().numpy()
     y1=closing(y1,selem)
     if (show):
@@ -364,18 +393,18 @@ def main():
 
     data_root_train='../tissue_data_2mod/train/'
     data_root_test='../tissue_data_2mod/test/'
-    TR=True # will perform training
-    TT=False # will perform testinf
+    TR=False# will perform training
+    TT=True  # will perform testinf
    ##File read and image reads,this needs to be converted to batch mode later on
     net=Ensemble(OptNet,crfrnn)#.cuda()
     if(TR):
        
         traindataset = MyDataset((data_root_train))
         train_loader = DataLoader(traindataset, batch_size=1,  collate_fn=my_collate)#pin_memory=True, num_workers=0,
-        for epoch in range(1, nEpoch + 1):
+        for epoch in range(5, nEpoch + 1):
         
             print("Epoch ", epoch)
-    
+            net.load_state_dict(torch.load('saved_model/net4.pth'))
             y=train(net,train_loader,traindataset,data_root_train)
             
             fname='saved_model/net'+str(epoch)+'.pth'
@@ -388,7 +417,7 @@ def main():
         testdataset = MyDataset((data_root_test))
 
         test_loader = DataLoader(testdataset, batch_size=1,num_workers=0,collate_fn=my_collate)
-        net.load_state_dict(torch.load('saved_model/net1.pth'))
+        net.load_state_dict(torch.load('saved_model/net4.pth'))
         y=test(net,test_loader,data_root_test)
        
 if __name__ == '__main__':
